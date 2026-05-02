@@ -232,6 +232,12 @@ variable "container_apps" {
         trigger_parameter = string
       }))
     })), [])
+    custom_domains = optional(list(object({
+      name                            = string
+      fqdn                            = string
+      certificate_key_vault_secret_id = string
+      certificate_binding_type        = optional(string, "SniEnabled")
+    })), [])
   }))
 }
 

@@ -336,3 +336,38 @@ resource "azurerm_container_app" "this" {
     }
   }
 }
+
+
+#Add custom domain certificates to Container Apps Environment
+resource "azurerm_container_app_environment_certificate" "this" {
+  for_each = merge([
+    for container_app in var.container_apps : {
+      for custom_domain in container_app.custom_domains :
+      "${container_app.container_name_suffix}|${custom_domain.name}" => merge(custom_domain, { container_name_suffix = container_app.container_name_suffix })
+    }
+  ]...)
+
+  name                         = each.value.name
+  container_app_environment_id = azurerm_container_app_environment.this[each.value.container_name_suffix].id
+
+  certificate_key_vault {
+    identity            = azurerm_container_app_environment.this[each.value.container_name_suffix].identity[0].principal_id
+    key_vault_secret_id = each.value.certificate_key_vault_secret_id
+  }
+}
+
+#Configure custom domain
+resource "azurerm_container_app_custom_domain" "this" {
+  for_each = merge([
+    for container_app in var.container_apps : {
+      for custom_domain in container_app.custom_domains :
+      "${container_app.container_name_suffix}|${custom_domain.name}" => merge(custom_domain, { container_name_suffix = container_app.container_name_suffix })
+    }
+  ]...)
+
+  name                                     = each.value.fqdn
+  container_app_id                         = azurerm_container_app.this[each.value.container_name_suffix].id
+  container_app_environment_certificate_id = azurerm_container_app_environment_certificate.this[each.value.container_name_suffix].id
+  certificate_binding_type                 = each.value.certificate_binding_type
+}
+
