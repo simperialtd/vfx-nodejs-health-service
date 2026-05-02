@@ -1,0 +1,161 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TERRAFORM_VERSION: "1.9.0"
+  TERRAGRUNT_VERSION: "1.0.3"
+
+jobs:
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.version.outputs.APP_VERSION }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Generate APP_VERSION
+        id: version
+        run: |
+          APP_VERSION=$(date +'%y.%m.%d')-${{ github.run_number }}
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build and Push Docker image
+        run: |
+          IMAGE=${{ vars.ACR_NAME }}.azurecr.io/nodejs-health-service:${{ steps.version.outputs.APP_VERSION }}
+          docker build \
+            --build-arg APP_VERSION=${{ steps.version.outputs.APP_VERSION }} \
+            -t $IMAGE \
+            ./app
+          docker push $IMAGE
+
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    environment: dev
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: ${{ env.TERRAGRUNT_VERSION }}
+
+      - name: Terragrunt Apply (Dev)
+        run: terragrunt run --all apply --non-interactive
+        working-directory: infra/environments/westeurope/dev
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+          TF_VAR_image_tag: ${{ needs.build-and-push.outputs.image-tag }}
+
+  plan-prod:
+    name: Plan Prod
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    outputs:
+      image-tag: ${{ needs.build-and-push.outputs.image-tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: ${{ env.TERRAGRUNT_VERSION }}
+
+      - name: Terragrunt Plan (Prod)
+        run: terragrunt run --all plan --non-interactive
+        working-directory: infra/environments/westeurope/prod
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+          TF_VAR_image_tag: ${{ needs.build-and-push.outputs.image-tag }}
+
+  deploy-prod:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    needs: [plan-prod]
+    environment: prod
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: ${{ env.TERRAGRUNT_VERSION }}
+
+      - name: Terragrunt Apply (Prod)
+        run: terragrunt run --all apply --non-interactive
+        working-directory: infra/environments/westeurope/prod
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+          TF_VAR_image_tag: ${{ needs.plan-prod.outputs.image-tag }}
+          

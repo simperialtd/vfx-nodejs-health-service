@@ -108,7 +108,3 @@ Access to the internal service is provided through the Azure Virtual Desktop (AV
      "version": "<image_version_tag>"
    }
    ```
-
-## Pending Improvements
-
-1. Deploy a self-hosted GitHub agent to enable private deployments and disable public access on Container Registry and Storage Accounts containing Terraform state

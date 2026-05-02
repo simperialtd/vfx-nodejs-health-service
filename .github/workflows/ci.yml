@@ -1,0 +1,91 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TERRAFORM_VERSION: "1.9.0"
+  TERRAGRUNT_VERSION: "1.0.3"
+
+jobs:
+  lint-validate:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+        
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: infra/modules
+
+      - name: Terraform Validate Modules
+        run: |
+          for dir in infra/modules/*/; do
+            echo "Validating $dir..."
+            cd "$dir"
+            terraform init -backend=false
+            terraform validate
+            cd "$GITHUB_WORKSPACE"
+          done
+
+  docker-build-check:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --build-arg APP_VERSION=ci-test -t nodejs-health-service:ci-test ./app
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [lint-validate]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+        
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: ${{ env.TERRAGRUNT_VERSION }}
+
+      - name: Terragrunt Plan (Dev)
+        id: plan-dev
+        run: terragrunt run --all plan --non-interactive
+        working-directory: infra/environments/westeurope/dev
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+
+      - name: Terragrunt Plan (Prod)
+        id: plan-prod
+        run: terragrunt run --all plan --non-interactive
+        working-directory: infra/environments/westeurope/prod
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
