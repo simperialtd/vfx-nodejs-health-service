@@ -87,7 +87,7 @@ inputs = {
     name                  = "njs-health-prod"
     workload_profile_type = "D4"
     minimum_count         = 1
-    maximum_count         = 5
+    maximum_count         = 2
   }]
   container_apps = [{
       name_suffix   = "nodejshs"
